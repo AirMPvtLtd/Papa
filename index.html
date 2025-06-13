@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spirit Voice Recorder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        #controls {
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        canvas {
+            border: 1px solid #000;
+            background-color: #fff;
+        }
+        #status {
+            margin-top: 10px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Spirit Voice Recorder</h1>
+    <div id="controls">
+        <button id="startBtn">Start Recording</button>
+        <button id="stopBtn" disabled>Stop Recording</button>
+        <button id="playBtn" disabled>Play Recording</button>
+        <button id="downloadBtn" disabled>Download Recording</button>
+    </div>
+    <p id="status">Press "Start Recording" to begin.</p>
+    <canvas id="visualizer" width="800" height="200"></canvas>
+
+    <script>
+        let audioContext;
+        let mediaRecorder;
+        let audioChunks = [];
+        let analyser;
+        let canvas = document.getElementById('visualizer');
+        let canvasCtx = canvas.getContext('2d');
+        let stream;
+
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const playBtn = document.getElementById('playBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const status = document.getElementById('status');
+
+        // Request microphone access and initialize
+        async function initAudio() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.ondataavailable = (e) => {
+                    audioChunks.push(e.data);
+                };
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    playBtn.disabled = false;
+                    downloadBtn.disabled = false;
+                    playBtn.onclick = () => {
+                        const audio = new Audio(audioUrl);
+                        audio.play();
+                    };
+                    downloadBtn.onclick = () => {
+                        const a = document.createElement('a');
+                        a.href = audioUrl;
+                        a.download = 'spirit_voice_recording.wav';
+                        a.click();
+                    };
+                };
+
+                visualize();
+            } catch (err) {
+                status.textContent = 'Error accessing microphone: ' + err.message;
+            }
+        }
+
+        // Visualize audio frequencies
+        function visualize() {
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            function draw() {
+                requestAnimationFrame(draw);
+                analyser.getByteFrequencyData(dataArray);
+
+                canvasCtx.fillStyle = 'rgb(255, 255, 255)';
+                canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const barWidth = (canvas.width / bufferLength) * 2.5;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    const barHeight = dataArray[i] * 2;
+                    canvasCtx.fillStyle = `rgb(${barHeight + 100}, 50, 150)`;
+                    canvasCtx.fillRect(x, canvas.height - barHeight / 2, barWidth, barHeight / 2);
+                    x += barWidth + 1;
+                }
+            }
+            draw();
+        }
+
+        // Button event listeners
+        startBtn.onclick = async () => {
+            await initAudio();
+            audioChunks = [];
+            mediaRecorder.start();
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            status.textContent = 'Recording...';
+        };
+
+        stopBtn.onclick = () => {
+            mediaRecorder.stop();
+            stream.getTracks().forEach(track => track.stop());
+            audioContext.close();
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            status.textContent = 'Recording stopped. Use Play or Download buttons.';
+        };
+    </script>
+</body>
+</html>
