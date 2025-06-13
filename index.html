@@ -3,46 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spirit Voice Recorder (EVP Focus)</title>
+    <title>Spirit Voice Communicator</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            background-color: #f0f0f0;
+            background-color: #f4f4f9;
             margin: 0;
             padding: 20px;
+            color: #333;
+        }
+        h1 {
+            color: #444;
+            font-size: 24px;
+            margin-bottom: 20px;
         }
         #controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
             margin-bottom: 20px;
         }
         button {
             padding: 10px 20px;
-            margin: 5px;
             font-size: 16px;
             cursor: pointer;
+            background-color: #6200ea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background-color: #3700b3;
+        }
+        #status {
+            margin: 10px 0;
+            font-size: 18px;
+            color: #444;
         }
         canvas {
             border: 1px solid #000;
             background-color: #fff;
+            margin-bottom: 20px;
         }
-        #status {
-            margin-top: 10px;
-            font-size: 18px;
+        #analysis {
+            width: 800px;
+            max-width: 100%;
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #analysis p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        #speedControl {
+            margin: 10px 0;
+        }
+        select {
+            padding: 5px;
+            font-size: 14px;
         }
     </style>
 </head>
 <body>
-    <h1>Spirit Voice Recorder (EVP Focus)</h1>
+    <h1>Spirit Voice Communicator</h1>
     <div id="controls">
         <button id="startBtn">Start Recording</button>
         <button id="stopBtn" disabled>Stop Recording</button>
         <button id="playBtn" disabled>Play Recording</button>
         <button id="downloadBtn" disabled>Download Recording</button>
+        <div id="speedControl">
+            <label for="playbackSpeed">Playback Speed: </label>
+            <select id="playbackSpeed">
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+            </select>
+        </div>
     </div>
-    <p id="status">Press "Start Recording" to begin. Optimized for EVP detection.</p>
+    <p id="status">Press "Start Recording" to begin. Optimized for spirit voice detection (100-300 Hz).</p>
     <canvas id="visualizer" width="800" height="200"></canvas>
+    <div id="analysis">
+        <h2>Analysis Results</h2>
+        <p id="anomalyCount">Anomalies Detected: 0</p>
+        <p id="anomalyDetails">Details: None</p>
+    </div>
 
     <script>
         let audioContext;
@@ -50,17 +104,23 @@
         let audioChunks = [];
         let analyser;
         let biquadFilter;
+        let gainNode;
         let canvas = document.getElementById('visualizer');
         let canvasCtx = canvas.getContext('2d');
         let stream;
+        let anomalies = [];
+        let lastAmplitude = 0;
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const playBtn = document.getElementById('playBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const status = document.getElementById('status');
+        const playbackSpeed = document.getElementById('playbackSpeed');
+        const anomalyCount = document.getElementById('anomalyCount');
+        const anomalyDetails = document.getElementById('anomalyDetails');
 
-        // Initialize audio with EVP-focused filtering
+        // Initialize audio with EVP-focused processing
         async function initAudio() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -68,15 +128,15 @@
                 analyser = audioContext.createAnalyser();
                 analyser.fftSize = 2048;
 
-                // Create a biquad filter for EVP frequency range (100-300 Hz)
+                // Bandpass filter for EVP range (100-300 Hz)
                 biquadFilter = audioContext.createBiquadFilter();
                 biquadFilter.type = 'bandpass';
-                biquadFilter.frequency.setValueAtTime(200, audioContext.currentTime); // Center at 200 Hz
-                biquadFilter.Q.setValueAtTime(1, audioContext.currentTime); // Narrow band
+                biquadFilter.frequency.setValueAtTime(200, audioContext.currentTime);
+                biquadFilter.Q.setValueAtTime(1, audioContext.currentTime);
 
-                // Create gain node for thresholding loud sounds
-                const gainNode = audioContext.createGain();
-                gainNode.gain.setValueAtTime(0.5, audioContext.currentTime); // Reduce louder sounds
+                // Gain node to suppress louder sounds
+                gainNode = audioContext.createGain();
+                gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
 
                 const source = audioContext.createMediaStreamSource(stream);
                 source.connect(biquadFilter);
@@ -97,14 +157,16 @@
                     downloadBtn.disabled = false;
                     playBtn.onclick = () => {
                         const audio = new Audio(audioUrl);
+                        audio.playbackRate = parseFloat(playbackSpeed.value);
                         audio.play();
                     };
                     downloadBtn.onclick = () => {
                         const a = document.createElement('a');
                         a.href = audioUrl;
-                        a.download = 'evp_recording.wav';
+                        a.download = `spirit_voice_${new Date().toISOString()}.wav`;
                         a.click();
                     };
+                    updateAnalysis();
                 };
 
                 visualize();
@@ -113,40 +175,68 @@
             }
         }
 
-        // Visualize filtered audio frequencies
+        // Visualize and detect anomalies
         function visualize() {
             const bufferLength = analyser.frequencyBinCount;
             const dataArray = new Uint8Array(bufferLength);
+            let startTime = Date.now();
 
             function draw() {
                 requestAnimationFrame(draw);
                 analyser.getByteFrequencyData(dataArray);
 
+                // Clear canvas
                 canvasCtx.fillStyle = 'rgb(255, 255, 255)';
                 canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
 
+                // Draw frequency bars
                 const barWidth = (canvas.width / bufferLength) * 2.5;
                 let x = 0;
+                let maxAmplitude = 0;
 
                 for (let i = 0; i < bufferLength; i++) {
                     const barHeight = dataArray[i] * 2;
-                    // Highlight anomalies (e.g., unusual spikes in EVP range)
-                    canvasCtx.fillStyle = barHeight > 100 ? 'rgb(255, 50, 50)' : 'rgb(50, 150, 255)';
+                    maxAmplitude = Math.max(maxAmplitude, dataArray[i]);
+                    canvasCtx.fillStyle = dataArray[i] > 100 ? 'rgb(255, 50, 50)' : 'rgb(50, 150, 255)';
                     canvasCtx.fillRect(x, canvas.height - barHeight / 2, barWidth, barHeight / 2);
                     x += barWidth + 1;
                 }
+
+                // Detect anomalies (sudden amplitude spikes)
+                if (Math.abs(maxAmplitude - lastAmplitude) > 50 && maxAmplitude > 100) {
+                    anomalies.push({
+                        time: (Date.now() - startTime) / 1000,
+                        amplitude: maxAmplitude,
+                        frequency: (audioContext.sampleRate / analyser.fftSize) * dataArray.indexOf(maxAmplitude)
+                    });
+                    anomalyCount.textContent = `Anomalies Detected: ${anomalies.length}`;
+                }
+                lastAmplitude = maxAmplitude;
             }
             draw();
         }
 
+        // Update analysis results
+        function updateAnalysis() {
+            anomalyCount.textContent = `Anomalies Detected: ${anomalies.length}`;
+            if (anomalies.length > 0) {
+                anomalyDetails.textContent = 'Details: ' + anomalies.map(a => 
+                    `Time: ${a.time.toFixed(2)}s, Amplitude: ${a.amplitude}, Freq: ${a.frequency.toFixed(2)}Hz`
+                ).join('; ');
+            } else {
+                anomalyDetails.textContent = 'Details: No anomalies detected.';
+            }
+        }
+
         // Button event listeners
         startBtn.onclick = async () => {
+            anomalies = [];
             await initAudio();
             audioChunks = [];
             mediaRecorder.start();
             startBtn.disabled = true;
             stopBtn.disabled = false;
-            status.textContent = 'Recording... Filtering for EVP (100-300 Hz).';
+            status.textContent = 'Recording... Filtering for spirit voices (100-300 Hz).';
         };
 
         stopBtn.onclick = () => {
@@ -155,7 +245,9 @@
             audioContext.close();
             startBtn.disabled = false;
             stopBtn.disabled = true;
-            status.textContent = 'Recording stopped. Use Play or Download buttons.';
+            playBtn.disabled = false;
+            downloadBtn.disabled = false;
+            status.textContent = 'Recording stopped. Use Play or Download buttons to review.';
         };
     </script>
 </body>
