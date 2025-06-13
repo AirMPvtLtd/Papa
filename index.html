@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spirit Voice Communicator</title>
+    <title>Spirit Voice Communicator with Transcription</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -65,6 +65,19 @@
             margin: 5px 0;
             font-size: 14px;
         }
+        #transcription {
+            margin-top: 20px;
+            width: 800px;
+            max-width: 100%;
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #transcription p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
         #speedControl {
             margin: 10px 0;
         }
@@ -75,12 +88,13 @@
     </style>
 </head>
 <body>
-    <h1>Spirit Voice Communicator</h1>
+    <h1>Spirit Voice Communicator with Transcription</h1>
     <div id="controls">
         <button id="startBtn">Start Recording</button>
         <button id="stopBtn" disabled>Stop Recording</button>
         <button id="playBtn" disabled>Play Recording</button>
         <button id="downloadBtn" disabled>Download Recording</button>
+        <button id="transcribeBtn" disabled>Transcribe Recording</button>
         <div id="speedControl">
             <label for="playbackSpeed">Playback Speed: </label>
             <select id="playbackSpeed">
@@ -97,6 +111,10 @@
         <p id="anomalyCount">Anomalies Detected: 0</p>
         <p id="anomalyDetails">Details: None</p>
     </div>
+    <div id="transcription">
+        <h2>Transcription Results</h2>
+        <p id="transcriptionOutput">Transcription: None</p>
+    </div>
 
     <script>
         let audioContext;
@@ -110,15 +128,18 @@
         let stream;
         let anomalies = [];
         let lastAmplitude = 0;
+        let audioBlob;
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const playBtn = document.getElementById('playBtn');
         const downloadBtn = document.getElementById('downloadBtn');
+        const transcribeBtn = document.getElementById('transcribeBtn');
         const status = document.getElementById('status');
         const playbackSpeed = document.getElementById('playbackSpeed');
         const anomalyCount = document.getElementById('anomalyCount');
         const anomalyDetails = document.getElementById('anomalyDetails');
+        const transcriptionOutput = document.getElementById('transcriptionOutput');
 
         // Initialize audio with EVP-focused processing
         async function initAudio() {
@@ -151,10 +172,11 @@
                     audioChunks.push(e.data);
                 };
                 mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
                     const audioUrl = URL.createObjectURL(audioBlob);
                     playBtn.disabled = false;
                     downloadBtn.disabled = false;
+                    transcribeBtn.disabled = false;
                     playBtn.onclick = () => {
                         const audio = new Audio(audioUrl);
                         audio.playbackRate = parseFloat(playbackSpeed.value);
@@ -228,11 +250,66 @@
             }
         }
 
+        // Transcribe audio using Web Speech API
+        async function transcribeAudio() {
+            if (!audioBlob) {
+                transcriptionOutput.textContent = 'Transcription: No recording available.';
+                return;
+            }
+
+            try {
+                status.textContent = 'Transcribing... This may take a moment.';
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+
+                // Create a new audio context for transcription processing
+                const transcriptionContext = new (window.AudioContext || window.webkitAudioContext)();
+                const source = transcriptionContext.createMediaElementSource(audio);
+                const gainNode = transcriptionContext.createGain();
+                gainNode.gain.setValueAtTime(2.0, transcriptionContext.currentTime); // Amplify for transcription
+                source.connect(gainNode);
+                gainNode.connect(transcriptionContext.destination);
+
+                // Web Speech API setup
+                const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+                recognition.lang = 'en-US';
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+
+                let transcription = '';
+                recognition.onresult = (event) => {
+                    transcription = event.results[0][0].transcript;
+                    transcriptionOutput.textContent = `Transcription: "${transcription}" (Confidence: ${event.results[0][0].confidence.toFixed(2)})`;
+                };
+                recognition.onerror = (event) => {
+                    transcriptionOutput.textContent = 'Transcription: Error occurred during transcription. Try manual review.';
+                    console.error('Speech recognition error:', event.error);
+                };
+                recognition.onend = () => {
+                    if (!transcription) {
+                        transcriptionOutput.textContent = 'Transcription: No clear words detected. Review recording manually.';
+                    }
+                    status.textContent = 'Transcription complete. Review results below.';
+                    transcriptionContext.close();
+                };
+
+                // Start transcription
+                audio.playbackRate = 0.5; // Slow playback to improve recognition of faint sounds
+                audio.play();
+                recognition.start();
+            } catch (err) {
+                transcriptionOutput.textContent = 'Transcription: Error processing audio.';
+                status.textContent = 'Error during transcription: ' + err.message;
+            }
+        }
+
         // Button event listeners
         startBtn.onclick = async () => {
             anomalies = [];
-            await initAudio();
             audioChunks = [];
+            audioBlob = null;
+            transcriptionOutput.textContent = 'Transcription: None';
+            await initAudio();
             mediaRecorder.start();
             startBtn.disabled = true;
             stopBtn.disabled = false;
@@ -247,8 +324,11 @@
             stopBtn.disabled = true;
             playBtn.disabled = false;
             downloadBtn.disabled = false;
-            status.textContent = 'Recording stopped. Use Play or Download buttons to review.';
+            transcribeBtn.disabled = false;
+            status.textContent = 'Recording stopped. Use Play, Download, or Transcribe buttons.';
         };
+
+        transcribeBtn.onclick = transcribeAudio;
     </script>
 </body>
 </html>
