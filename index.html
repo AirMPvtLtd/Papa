@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spirit Voice Recorder</title>
+    <title>Spirit Voice Recorder (EVP Focus)</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -34,14 +34,14 @@
     </style>
 </head>
 <body>
-    <h1>Spirit Voice Recorder</h1>
+    <h1>Spirit Voice Recorder (EVP Focus)</h1>
     <div id="controls">
         <button id="startBtn">Start Recording</button>
         <button id="stopBtn" disabled>Stop Recording</button>
         <button id="playBtn" disabled>Play Recording</button>
         <button id="downloadBtn" disabled>Download Recording</button>
     </div>
-    <p id="status">Press "Start Recording" to begin.</p>
+    <p id="status">Press "Start Recording" to begin. Optimized for EVP detection.</p>
     <canvas id="visualizer" width="800" height="200"></canvas>
 
     <script>
@@ -49,6 +49,7 @@
         let mediaRecorder;
         let audioChunks = [];
         let analyser;
+        let biquadFilter;
         let canvas = document.getElementById('visualizer');
         let canvasCtx = canvas.getContext('2d');
         let stream;
@@ -59,7 +60,7 @@
         const downloadBtn = document.getElementById('downloadBtn');
         const status = document.getElementById('status');
 
-        // Request microphone access and initialize
+        // Initialize audio with EVP-focused filtering
         async function initAudio() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -67,10 +68,25 @@
                 analyser = audioContext.createAnalyser();
                 analyser.fftSize = 2048;
 
-                const source = audioContext.createMediaStreamSource(stream);
-                source.connect(analyser);
+                // Create a biquad filter for EVP frequency range (100-300 Hz)
+                biquadFilter = audioContext.createBiquadFilter();
+                biquadFilter.type = 'bandpass';
+                biquadFilter.frequency.setValueAtTime(200, audioContext.currentTime); // Center at 200 Hz
+                biquadFilter.Q.setValueAtTime(1, audioContext.currentTime); // Narrow band
 
-                mediaRecorder = new MediaRecorder(stream);
+                // Create gain node for thresholding loud sounds
+                const gainNode = audioContext.createGain();
+                gainNode.gain.setValueAtTime(0.5, audioContext.currentTime); // Reduce louder sounds
+
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(biquadFilter);
+                biquadFilter.connect(gainNode);
+                gainNode.connect(analyser);
+
+                // Set up MediaRecorder with filtered audio
+                const dest = audioContext.createMediaStreamDestination();
+                gainNode.connect(dest);
+                mediaRecorder = new MediaRecorder(dest.stream);
                 mediaRecorder.ondataavailable = (e) => {
                     audioChunks.push(e.data);
                 };
@@ -86,7 +102,7 @@
                     downloadBtn.onclick = () => {
                         const a = document.createElement('a');
                         a.href = audioUrl;
-                        a.download = 'spirit_voice_recording.wav';
+                        a.download = 'evp_recording.wav';
                         a.click();
                     };
                 };
@@ -97,7 +113,7 @@
             }
         }
 
-        // Visualize audio frequencies
+        // Visualize filtered audio frequencies
         function visualize() {
             const bufferLength = analyser.frequencyBinCount;
             const dataArray = new Uint8Array(bufferLength);
@@ -114,7 +130,8 @@
 
                 for (let i = 0; i < bufferLength; i++) {
                     const barHeight = dataArray[i] * 2;
-                    canvasCtx.fillStyle = `rgb(${barHeight + 100}, 50, 150)`;
+                    // Highlight anomalies (e.g., unusual spikes in EVP range)
+                    canvasCtx.fillStyle = barHeight > 100 ? 'rgb(255, 50, 50)' : 'rgb(50, 150, 255)';
                     canvasCtx.fillRect(x, canvas.height - barHeight / 2, barWidth, barHeight / 2);
                     x += barWidth + 1;
                 }
@@ -129,7 +146,7 @@
             mediaRecorder.start();
             startBtn.disabled = true;
             stopBtn.disabled = false;
-            status.textContent = 'Recording...';
+            status.textContent = 'Recording... Filtering for EVP (100-300 Hz).';
         };
 
         stopBtn.onclick = () => {
